@@ -8,7 +8,8 @@ pub fn entropy(rand_var: []const f64) f64 {
     var h: f64 = 0.0;
 
     for (rand_var) |p| {
-        h += p * @log2(p);
+        if (p > 0.0)
+            h += p * @log2(p);
     }
 
     return -h;
@@ -24,12 +25,19 @@ fn sumVar(rand_var: []const f64) f64 {
 }
 
 /// Normalizes the probabilities in rand_var so that their sum is 1
+/// Negative probabilities are also snapped to 0
 /// This is done in place
-pub fn normalize(rand_var: []f64) void {
-    // Get the sum of all the random variables
-    const sum = sumVar(rand_var);
+pub fn normalize(rand_var: []f64) !void {
+    // Get the sum of all the random variables, and reset negative ones
+    var sum: f64 = 0.0;
+    for (rand_var) |*p| {
+        if (p.* < 0) {
+            p.* = 0;
+        } else sum += p.*;
+    }
     // It shouldn't be 0
-    std.debug.assert(sum != 0.0);
+    if (sum == 0.0)
+        return error.NoPossibleChoice;
     // Normalize so the the sum will be 1.0
     for (rand_var) |*p| {
         p.* /= sum;
@@ -89,19 +97,28 @@ test "sum" {
 test "normalize" {
     // Normalize some slices, check that the sum is 1
     var ps1 = [_]f64{ 1.0, 1.0, 2.0 };
-    normalize(&ps1);
+    try normalize(&ps1);
     try tst.expectApproxEqAbs(1.0, sumVar(&ps1), 0.001);
     try expectApproxEqualSlicesAbs(f64, &[_]f64{ 0.25, 0.25, 0.5 }, &ps1, 0.001);
 
     var ps2 = [_]f64{10};
-    normalize(&ps2);
+    try normalize(&ps2);
     try tst.expectApproxEqAbs(1.0, sumVar(&ps2), 0.001);
     try expectApproxEqualSlicesAbs(f64, &[_]f64{1}, &ps2, 0.001);
+
+    var ps3 = [_]f64{ 1.0, -1.0, 3.0 };
+    try normalize(&ps3);
+    try tst.expectApproxEqAbs(1.0, sumVar(&ps3), 0.001);
+    try expectApproxEqualSlicesAbs(f64, &[_]f64{ 0.25, 0.0, 3.0 / 4.0 }, &ps3, 0.001);
+
+    var ps4 = [_]f64{ 0.0, -1.0, 0.0 };
+    try tst.expectError(error.NoPossibleChoice, normalize(&ps4));
 }
 
 test "entropy calculation" {
     // Try the entropy calculation for a few situations
     try tst.expectApproxEqRel(0.0, entropy(&[_]f64{1.0}), 0.001);
+    try tst.expectApproxEqRel(0.0, entropy(&[_]f64{ 0.0, 1.0 }), 0.001);
     try tst.expectApproxEqRel(1.0, entropy(&([_]f64{0.5} ** 2)), 0.001);
     try tst.expectApproxEqRel(2.0, entropy(&([_]f64{0.25} ** 4)), 0.001);
     try tst.expectApproxEqRel(0.7219, entropy(&[_]f64{ 0.80, 0.20 }), 0.001);
